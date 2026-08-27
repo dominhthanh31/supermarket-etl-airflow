@@ -1,0 +1,87 @@
+[2026-08-27T02:01:42.448+0000] {taskinstance.py:1956} INFO - Dependencies all met for dep_context=non-requeueable deps ti=<TaskInstance: supermarket_etl_pipeline.clean_to_silver manual__2026-08-27T02:01:38.378835+00:00 [queued]>
+[2026-08-27T02:01:42.456+0000] {taskinstance.py:1956} INFO - Dependencies all met for dep_context=requeueable deps ti=<TaskInstance: supermarket_etl_pipeline.clean_to_silver manual__2026-08-27T02:01:38.378835+00:00 [queued]>
+[2026-08-27T02:01:42.458+0000] {taskinstance.py:2170} INFO - Starting attempt 1 of 1
+[2026-08-27T02:01:42.468+0000] {taskinstance.py:2191} INFO - Executing <Task(PostgresOperator): clean_to_silver> on 2026-08-27 02:01:38.378835+00:00
+[2026-08-27T02:01:42.474+0000] {standard_task_runner.py:60} INFO - Started process 548 to run task
+[2026-08-27T02:01:42.476+0000] {standard_task_runner.py:87} INFO - Running: ['***', 'tasks', 'run', 'supermarket_etl_pipeline', 'clean_to_silver', 'manual__2026-08-27T02:01:38.378835+00:00', '--job-id', '8', '--raw', '--subdir', 'DAGS_FOLDER/supermarket_etl_pipeline.py', '--cfg-path', '/tmp/tmpw68vh3cc']
+[2026-08-27T02:01:42.478+0000] {standard_task_runner.py:88} INFO - Job 8: Subtask clean_to_silver
+[2026-08-27T02:01:42.516+0000] {task_command.py:423} INFO - Running <TaskInstance: supermarket_etl_pipeline.clean_to_silver manual__2026-08-27T02:01:38.378835+00:00 [running]> on host bc79786c6c4c
+[2026-08-27T02:01:42.678+0000] {taskinstance.py:2480} INFO - Exporting env vars: AIRFLOW_CTX_DAG_OWNER='etl' AIRFLOW_CTX_DAG_ID='supermarket_etl_pipeline' AIRFLOW_CTX_TASK_ID='clean_to_silver' AIRFLOW_CTX_EXECUTION_DATE='2026-08-27T02:01:38.378835+00:00' AIRFLOW_CTX_TRY_NUMBER='1' AIRFLOW_CTX_DAG_RUN_ID='manual__2026-08-27T02:01:38.378835+00:00'
+[2026-08-27T02:01:42.680+0000] {sql.py:276} INFO - Executing: DROP TABLE IF EXISTS silver.supermarket;
+
+CREATE TABLE silver.supermarket AS
+WITH dedup AS (
+    -- DISTINCT ON: nếu invoice_id bị trùng, chỉ giữ 1 dòng 
+    SELECT DISTINCT ON (invoice_id) *
+    FROM bronze.supermarket
+    ORDER BY invoice_id
+)
+SELECT
+    invoice_id,
+    branch,
+    city,
+    customer_type,
+    gender,
+    product_line,
+    unit_price,
+    quantity,
+    tax_5pct,
+    total,
+    date::DATE                  AS sale_date,
+    time::TIME                  AS sale_time,
+    payment,
+    cogs,
+    gross_margin_percentage,
+    gross_income,
+    rating
+FROM dedup
+WHERE
+    invoice_id IS NOT NULL
+    AND branch IN ('A', 'B', 'C')
+    AND unit_price > 0
+    AND quantity BETWEEN 1 AND 10
+    AND rating BETWEEN 1.0 AND 10.0
+    AND ABS(total - unit_price * quantity * 1.05) < 0.01
+    AND total > 0;
+[2026-08-27T02:01:42.696+0000] {base.py:83} INFO - Using connection ID 'postgres_etl' for task execution.
+[2026-08-27T02:01:42.703+0000] {base.py:83} INFO - Using connection ID 'postgres_etl' for task execution.
+[2026-08-27T02:01:42.712+0000] {sql.py:450} INFO - Running statement: DROP TABLE IF EXISTS silver.supermarket;
+
+CREATE TABLE silver.supermarket AS
+WITH dedup AS (
+    -- DISTINCT ON: nếu invoice_id bị trùng, chỉ giữ 1 dòng 
+    SELECT DISTINCT ON (invoice_id) *
+    FROM bronze.supermarket
+    ORDER BY invoice_id
+)
+SELECT
+    invoice_id,
+    branch,
+    city,
+    customer_type,
+    gender,
+    product_line,
+    unit_price,
+    quantity,
+    tax_5pct,
+    total,
+    date::DATE                  AS sale_date,
+    time::TIME                  AS sale_time,
+    payment,
+    cogs,
+    gross_margin_percentage,
+    gross_income,
+    rating
+FROM dedup
+WHERE
+    invoice_id IS NOT NULL
+    AND branch IN ('A', 'B', 'C')
+    AND unit_price > 0
+    AND quantity BETWEEN 1 AND 10
+    AND rating BETWEEN 1.0 AND 10.0
+    AND ABS(total - unit_price * quantity * 1.05) < 0.01
+    AND total > 0;, parameters: None
+[2026-08-27T02:01:42.723+0000] {sql.py:459} INFO - Rows affected: 1000
+[2026-08-27T02:01:42.736+0000] {taskinstance.py:1138} INFO - Marking task as SUCCESS. dag_id=supermarket_etl_pipeline, task_id=clean_to_silver, execution_date=20260827T020138, start_date=20260827T020142, end_date=20260827T020142
+[2026-08-27T02:01:42.771+0000] {local_task_job_runner.py:234} INFO - Task exited with return code 0
+[2026-08-27T02:01:42.789+0000] {taskinstance.py:3280} INFO - 1 downstream tasks scheduled from follow-on schedule check
