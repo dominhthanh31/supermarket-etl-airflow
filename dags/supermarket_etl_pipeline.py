@@ -2,7 +2,7 @@ from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.operators.empty import EmptyOperator
 from airflow.providers.postgres.operators.postgres import PostgresOperator
-from datetime import datetime
+from datetime import datetime, timedelta
 import uuid
 import pandas as pd
 from sqlalchemy import create_engine, text
@@ -10,6 +10,8 @@ from sqlalchemy import create_engine, text
 default_args = {
     'owner': 'etl',
     'start_date': datetime(2024, 1, 1),
+    'retries': 1,
+    'retry_delay': timedelta(minutes=5),
 }
 
 DATA_PATH = '/opt/airflow/data/Supermarket_sales.xlsx'
@@ -85,15 +87,42 @@ def validate_gold():
         ).scalar()
         assert null_branch == 0, "Có dòng branch NULL trong gold!"
 
+        bad_rating = conn.execute(
+            text('SELECT COUNT(*) FROM gold.supermarket_daily_summary WHERE avg_rating NOT BETWEEN 1 AND 10')
+        ).scalar()
+        assert bad_rating == 0, f"Có {bad_rating} dòng avg_rating ngoài khoảng 1-10!"
+
+        neg_qty = conn.execute(
+            text('SELECT COUNT(*) FROM gold.supermarket_daily_summary WHERE total_quantity <= 0')
+        ).scalar()
+        assert neg_qty == 0, f"Có {neg_qty} dòng total_quantity <= 0!"
+
     with engine.begin() as conn:
-        _log(conn, run_id, "VALIDATE", "SUCCESS", f"{count} rows in gold, all checks passed")
+        _log(conn, run_id, "VALIDATE", "SUCCESS", f"{count} rows in gold, all 5 checks passed")
     print(f"validate_gold PASSED — {count} dòng | run_id={run_id}")
+
+
+def log_rejection_rate():
+    """So sánh số dòng Bronze vs Silver, ghi rejection rate vào etl_log"""
+    run_id = f"RUN_{uuid.uuid4().hex[:8]}"
+    engine = create_engine(CONN_STR)
+
+    with engine.connect() as conn:
+        bronze = conn.execute(text('SELECT COUNT(*) FROM bronze.supermarket')).scalar()
+        silver = conn.execute(text('SELECT COUNT(*) FROM silver.supermarket')).scalar()
+        rejected = bronze - silver
+        rate = round(rejected / bronze * 100, 2) if bronze > 0 else 0
+
+    with engine.begin() as conn:
+        _log(conn, run_id, "REJECTION_RATE", "INFO",
+             f"Bronze={bronze}, Silver={silver}, Rejected={rejected} ({rate}%)")
+    print(f"Rejection rate: {rate}% ({rejected}/{bronze} dòng bị loại) | run_id={run_id}")
 
 
 with DAG(
     dag_id='supermarket_etl_pipeline',
     default_args=default_args,
-    schedule_interval=None,
+    schedule_interval='@daily',
     catchup=False,
 ) as dag:
 
@@ -117,9 +146,14 @@ with DAG(
         sql='sql/gold_supermarket.sql',
     )
 
+    log_rejection = PythonOperator(
+        task_id='log_rejection_rate',
+        python_callable=log_rejection_rate,
+    )
+
     validate = PythonOperator(
         task_id='validate_gold',
         python_callable=validate_gold,
     )
 
-    start >> load_to_bronze >> clean_to_silver >> build_gold >> validate >> end
+    start >> load_to_bronze >> clean_to_silver >> log_rejection >> build_gold >> validate >> end
